@@ -1,7 +1,19 @@
 cmake_minimum_required(VERSION 3.15)
 
+# 设置 Release 模式
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# 添加 O2 优化选项
+if(MSVC)
+  add_compile_options("/O2")
+else()
+  add_compile_options("-O2")
+endif()
 
 project(Moer-lite LANGUAGES CXX)
 
@@ -25,6 +37,7 @@ add_subdirectory(./externals)
 
 add_executable(Moer
   src/main.cpp
+  src/CoreLayer/Debug/Debug.cpp
 
   src/CoreLayer/Math/Transform.cpp
 

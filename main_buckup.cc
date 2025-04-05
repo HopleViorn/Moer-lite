@@ -53,11 +53,10 @@ inline void printProgress(float percentage) {
   fflush(stdout);
 }
 
-void renderTile(int threadId, int numThreads, int width, int height, int spp, 
+void renderTile(int startY, int endY, int width, int height, int spp, 
                 std::shared_ptr<Camera> camera, std::shared_ptr<Scene> scene,
                 std::shared_ptr<Integrator> integrator, std::shared_ptr<Sampler> sampler) {
-  // 使用交错分配策略，每个线程处理间隔的行
-  for (int y = threadId; y < height; y += numThreads) {
+  for (int y = startY; y < endY; ++y) {
     for (int x = 0; x < width; ++x) {
       Vector2f NDC{(float)x / width, (float)y / height};
       Spectrum li(.0f);
@@ -100,15 +99,16 @@ int main(int argc, char **argv) {
   std::cout << "numThreads: " << numThreads << std::endl;
   if (numThreads == 0) numThreads = 4;
   
+  int rowsPerThread = height / numThreads;
   std::vector<std::thread> threads;
   
-  // 创建并启动线程，使用交错分配策略
   for (unsigned int i = 0; i < numThreads; ++i) {
-    threads.emplace_back(renderTile, i, numThreads, width, height, spp,
+    int startY = i * rowsPerThread;
+    int endY = (i == numThreads - 1) ? height : (i + 1) * rowsPerThread;
+    threads.emplace_back(renderTile, startY, endY, width, height, spp,
                         camera, scene, integrator, sampler);
   }
   
-  // 等待所有线程完成
   for (auto& thread : threads) {
     thread.join();
   }
@@ -123,18 +123,12 @@ int main(int argc, char **argv) {
              1000.f);
 
   //* 目前支持输出为png/hdr两种格式
-  std::string outputName = fetchRequired<std::string>(json["output"], "filename");
-  std::string outputDir = "output";
-  // 确保输出目录存在
-  FileUtil::setWorkingDirectory(outputDir);
-  
-  // 构建完整的输出路径
-  std::string outputPath = FileUtil::getFullPath(outputName);
-  
+  std::string outputName =
+      fetchRequired<std::string>(json["output"], "filename");
   if (std::regex_match(outputName, std::regex("(.*)(\\.png)"))) {
-    camera->film->savePNG(outputPath.c_str());
+    camera->film->savePNG(outputName.c_str());
   } else if (std::regex_match(outputName, std::regex("(.*)(\\.hdr)"))) {
-    camera->film->saveHDR(outputPath.c_str());
+    camera->film->saveHDR(outputName.c_str());
   } else {
     std::cout << "Only support output as PNG/HDR\n";
   }

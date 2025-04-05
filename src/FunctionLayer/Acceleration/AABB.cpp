@@ -40,8 +40,40 @@ bool AABB::Overlap(const AABB &other) const {
 }
 
 bool AABB::RayIntersect(const Ray &ray, float *tMin, float *tMax) const {
-  //* todo 实现AABB与光线求交
-  return false;
+  float t0 = ray.tNear;
+  float t1 = ray.tFar;
+  
+  for (int i = 0; i < 3; ++i) {
+    // 计算与轴对齐平面的交点参数
+    float invD = 1.0f / ray.direction[i];
+
+    float tNear = (pMin[i] - ray.origin[i]) * invD;
+    float tFar = (pMax[i] - ray.origin[i]) * invD;
+
+    // 处理方向分量为负的情况
+    if (invD < 0.0f) std::swap(tNear, tFar);
+    
+    // 处理非常薄的AABB，增加一个小的epsilon容差
+    const float epsilon = 1e-5f;
+    // if (fabs(pMax[i] - pMin[i]) < epsilon) {
+    //   // 对于极薄的维度，增加一点容差避免数值问题
+    // }
+    tNear -= epsilon;
+    tFar += epsilon;
+    
+    // 更新交点区间
+    t0 = tNear > t0 ? tNear : t0;
+    t1 = tFar < t1 ? tFar : t1;
+    
+    // 如果区间为空，表示不相交
+    if (t0 > t1) return false;
+  }
+  
+  // 如果区间不为空，设置输出参数并返回相交结果
+  if (tMin) *tMin = t0;
+  if (tMax) *tMax = t1;
+  
+  return true;
 }
 
 Point3f AABB::Center() const {
