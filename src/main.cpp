@@ -81,6 +81,15 @@ int main(int argc, char **argv) {
   // 初始化调试系统
   Debug::DebugManager::getInstance()->enableFileLogging("debug.log");
 
+  // 解析命令行参数
+  bool useMultiThread = true;
+  if (argc > 2) {
+    std::string arg = argv[2];
+    if (arg == "--no-thread" || arg == "-n") {
+      useMultiThread = false;
+    }
+  }
+
   const std::string sceneDir = std::string(argv[1]);
   FileUtil::setWorkingDirectory(sceneDir);
   std::string sceneJsonPath = FileUtil::getFullPath("scene.json");
@@ -96,21 +105,26 @@ int main(int argc, char **argv) {
   processedPixels = 0;
   renderStartTime = std::chrono::system_clock::now();
 
-  unsigned int numThreads = std::thread::hardware_concurrency();
-  std::cout << "numThreads: " << numThreads << std::endl;
-  if (numThreads == 0) numThreads = 4;
-  
-  std::vector<std::thread> threads;
-  
-  // 创建并启动线程，使用交错分配策略
-  for (unsigned int i = 0; i < numThreads; ++i) {
-    threads.emplace_back(renderTile, i, numThreads, width, height, spp,
-                        camera, scene, integrator, sampler);
-  }
-  
-  // 等待所有线程完成
-  for (auto& thread : threads) {
-    thread.join();
+  if (useMultiThread) {
+    unsigned int numThreads = std::thread::hardware_concurrency();
+    std::cout << "Using " << numThreads << " threads" << std::endl;
+    if (numThreads == 0) numThreads = 4;
+    
+    std::vector<std::thread> threads;
+    
+    // 创建并启动线程，使用交错分配策略
+    for (unsigned int i = 0; i < numThreads; ++i) {
+      threads.emplace_back(renderTile, i, numThreads, width, height, spp,
+                          camera, scene, integrator, sampler);
+    }
+    
+    // 等待所有线程完成
+    for (auto& thread : threads) {
+      thread.join();
+    }
+  } else {
+    std::cout << "Using single thread" << std::endl;
+    renderTile(0, 1, width, height, spp, camera, scene, integrator, sampler);
   }
   
   printProgress(1.f);
