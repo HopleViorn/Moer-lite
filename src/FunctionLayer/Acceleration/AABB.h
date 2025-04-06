@@ -25,6 +25,8 @@ public:
                     float *tMax = nullptr) const;
 
   Point3f Center() const;
+  
+  float SurfaceArea() const;
 
 public:
   Point3f pMin, pMax;

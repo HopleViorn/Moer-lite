@@ -80,3 +80,8 @@ Point3f AABB::Center() const {
   return Point3f{(pMin[0] + pMax[0]) * .5f, (pMin[1] + pMax[1]) * .5f,
                  (pMin[2] + pMax[2]) * .5f};
 }
+
+float AABB::SurfaceArea() const {
+  Vector3f d = pMax - pMin;
+  return 2.f * (d[0] * d[1] + d[0] * d[2] + d[1] * d[2]);
+}
