@@ -15,7 +15,19 @@ else()
   add_compile_options("-O2")
 endif()
 
-project(Moer-lite LANGUAGES CXX)
+# 添加CUDA语言支持
+project(Moer-lite LANGUAGES CXX CUDA)
+
+# 设置CUDA编译器选项
+set(CMAKE_CUDA_STANDARD 14)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_ARCHITECTURES 70 75 80)  # 根据你的GPU架构调整，例如：70/75/80等
+
+# 添加CUDA相关编译选项
+if(NOT MSVC)
+  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} --expt-relaxed-constexpr --expt-extended-lambda")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr --expt-extended-lambda")
+endif()
 
 if(MSVC)
   add_compile_options("/MP")
@@ -46,6 +58,8 @@ add_executable(Moer
   src/FunctionLayer/Acceleration/EmbreeBVH.cpp
   src/FunctionLayer/Acceleration/Linear.cpp
   src/FunctionLayer/Acceleration/Octree.cpp
+  src/FunctionLayer/Acceleration/BVH.cpp
+  src/FunctionLayer/Acceleration/LBVH.cpp
 
   src/FunctionLayer/Integrator/NormalIntegrator.cpp
   src/FunctionLayer/Integrator/DirectIntegrator.cpp
@@ -72,12 +86,26 @@ add_executable(Moer
   src/ResourceLayer/Image.cpp
   src/ResourceLayer/Mesh.cpp
   src/ResourceLayer/FileUtil.cpp
-        src/FunctionLayer/Shape/Disk.cpp src/FunctionLayer/Shape/Disk.h src/FunctionLayer/Shape/Cone.cpp src/FunctionLayer/Shape/Cone.h src/FunctionLayer/Shape/Cylinder.cpp src/FunctionLayer/Shape/Cylinder.h src/FunctionLayer/Integrator/UVIntegrator.cpp src/FunctionLayer/Integrator/UVIntegrator.h src/FunctionLayer/Acceleration/BVH.cpp src/FunctionLayer/Acceleration/BVH.h)
+  src/FunctionLayer/Shape/Disk.cpp
+  src/FunctionLayer/Shape/Cone.cpp
+  src/FunctionLayer/Shape/Cylinder.cpp 
+  src/FunctionLayer/Integrator/UVIntegrator.cpp)
+
+# 启用CUDA支持
+set_target_properties(Moer PROPERTIES
+  CUDA_SEPARABLE_COMPILATION ON
+)
+
+# 针对CUDA代码禁用一些警告
+if(CMAKE_CUDA_COMPILER_ID STREQUAL "NVIDIA")
+  target_compile_options(Moer PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--disable-warnings>)
+endif()
 
 target_include_directories(Moer PUBLIC ./externals)
 target_include_directories(Moer PUBLIC ./src)
 target_include_directories(Moer PUBLIC ./externals/json/include)
 target_include_directories(Moer PUBLIC ./externals/embree/include)
+target_include_directories(Moer PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
 if(WIN32)
   set(LIBS_PATH ${PROJECT_SOURCE_DIR}/libs/win)
@@ -105,6 +133,7 @@ add_custom_command(TARGET Moer POST_BUILD
 
 target_link_libraries(Moer PUBLIC embree3)
 target_link_libraries(Moer PUBLIC tinyobjloader)
+target_link_libraries(Moer PUBLIC cuda cudart)
 
 if(APPLE)
   execute_process(

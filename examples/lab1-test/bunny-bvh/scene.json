@@ -42,7 +42,7 @@
     "type": "directSampleLight"
   },
   "scene": {
-    "acceleration": "bvh",
+    "acceleration": "lbvh",
     "shapes": [
       {
         "type": "triangle",
