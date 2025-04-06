@@ -116,66 +116,76 @@ void BVH::build() {
                     node.box = bounds;
                     node.rightChildOffset = 0;
                 } else {
-                    // 使用SAH选择最优分割点
-                    constexpr int nBuckets = 12;
-                    struct BucketInfo {
-                        int count = 0;
-                        AABB bounds;
-                    };
-                    BucketInfo buckets[nBuckets];
-                    
-                    // 初始化桶信息
-                    for (int i = start; i < end; ++i) {
-                        int b = nBuckets *
-                            ((primitiveInfo[i].centroid[dim] - centroidBounds.pMin[dim]) /
-                             (centroidBounds.pMax[dim] - centroidBounds.pMin[dim]));
-                        if (b == nBuckets) b = nBuckets - 1;
-                        buckets[b].count++;
-                        buckets[b].bounds.Expand(primitiveInfo[i].bounds);
-                    }
-                    
-                    // 计算每个可能分割点的代价
-                    float cost[nBuckets - 1];
-                    for (int i = 0; i < nBuckets - 1; ++i) {
-                        AABB b0, b1;
-                        int count0 = 0, count1 = 0;
-                        for (int j = 0; j <= i; ++j) {
-                            b0.Expand(buckets[j].bounds);
-                            count0 += buckets[j].count;
+                    if (1) {
+                        // 使用SAH选择最优分割点
+                        constexpr int nBuckets = 12;
+                        struct BucketInfo {
+                            int count = 0;
+                            AABB bounds;
+                        };
+                        BucketInfo buckets[nBuckets];
+                        
+                        // 初始化桶信息
+                        for (int i = start; i < end; ++i) {
+                            int b = nBuckets *
+                                ((primitiveInfo[i].centroid[dim] - centroidBounds.pMin[dim]) /
+                                 (centroidBounds.pMax[dim] - centroidBounds.pMin[dim]));
+                            if (b == nBuckets) b = nBuckets - 1;
+                            buckets[b].count++;
+                            buckets[b].bounds.Expand(primitiveInfo[i].bounds);
                         }
-                        for (int j = i+1; j < nBuckets; ++j) {
-                            b1.Expand(buckets[j].bounds);
-                            count1 += buckets[j].count;
+                        
+                        // 计算每个可能分割点的代价
+                        float cost[nBuckets - 1];
+                        for (int i = 0; i < nBuckets - 1; ++i) {
+                            AABB b0, b1;
+                            int count0 = 0, count1 = 0;
+                            for (int j = 0; j <= i; ++j) {
+                                b0.Expand(buckets[j].bounds);
+                                count0 += buckets[j].count;
+                            }
+                            for (int j = i+1; j < nBuckets; ++j) {
+                                b1.Expand(buckets[j].bounds);
+                                count1 += buckets[j].count;
+                            }
+                            cost[i] = 0.125f +
+                                     (count0 * b0.SurfaceArea() +
+                                      count1 * b1.SurfaceArea()) / bounds.SurfaceArea();
                         }
-                        cost[i] = 0.125f +
-                                 (count0 * b0.SurfaceArea() +
-                                  count1 * b1.SurfaceArea()) / bounds.SurfaceArea();
-                    }
-                    
-                    // 找到最小代价的分割点
-                    float minCost = cost[0];
-                    int minCostSplit = 0;
-                    for (int i = 1; i < nBuckets - 1; ++i) {
-                        if (cost[i] < minCost) {
-                            minCost = cost[i];
-                            minCostSplit = i;
+                        
+                        // 找到最小代价的分割点
+                        float minCost = cost[0];
+                        int minCostSplit = 0;
+                        for (int i = 1; i < nBuckets - 1; ++i) {
+                            if (cost[i] < minCost) {
+                                minCost = cost[i];
+                                minCostSplit = i;
+                            }
                         }
-                    }
-                    
-                    // 如果分割代价比不分割更高，则创建叶子节点
-                    float leafCost = nPrimitives;
-                    if (nPrimitives > bvhLeafMaxSize || minCost < leafCost) {
-                        // 根据最小代价分割点划分图元
-                        auto pmid = std::partition(&primitiveInfo[start],
-                                                  &primitiveInfo[end-1]+1,
-                                                  [=](const PrimitiveInfo &pi) {
-                                                      int b = nBuckets *
-                                                          ((pi.centroid[dim] - centroidBounds.pMin[dim]) /
-                                                           (centroidBounds.pMax[dim] - centroidBounds.pMin[dim]));
-                                                      if (b == nBuckets) b = nBuckets - 1;
-                                                      return b <= minCostSplit;
-                                                  });
-                        mid = pmid - &primitiveInfo[0];
+                        
+                        // 如果分割代价比不分割更高，则创建叶子节点
+                        float leafCost = nPrimitives;
+                        if (nPrimitives > bvhLeafMaxSize || minCost < leafCost) {
+                            // 根据最小代价分割点划分图元
+                            auto pmid = std::partition(&primitiveInfo[start],
+                                                      &primitiveInfo[end-1]+1,
+                                                      [=](const PrimitiveInfo &pi) {
+                                                          int b = nBuckets *
+                                                              ((pi.centroid[dim] - centroidBounds.pMin[dim]) /
+                                                               (centroidBounds.pMax[dim] - centroidBounds.pMin[dim]));
+                                                          if (b == nBuckets) b = nBuckets - 1;
+                                                          return b <= minCostSplit;
+                                                      });
+                            mid = pmid - &primitiveInfo[0];
+                        }
+                    } else {
+                        // 使用中点分割
+                        mid = (start + end) / 2;
+                        std::nth_element(&primitiveInfo[start], &primitiveInfo[mid],
+                                        &primitiveInfo[end-1]+1,
+                                        [dim](const PrimitiveInfo &a, const PrimitiveInfo &b) {
+                                            return a.centroid[dim] < b.centroid[dim];
+                                        });
                     }
                     
                     // 递归创建子节点
