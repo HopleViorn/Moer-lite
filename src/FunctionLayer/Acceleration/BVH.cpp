@@ -13,6 +13,12 @@ struct BVH::BVHNode {
     bool isLeaf() const { return nPrimitives > 0; }
 };
 
+// 用于计算AABB的表面积
+inline float computeSurfaceArea(const AABB& box) {
+    Vector3f diag = box.pMax - box.pMin;
+    return 2.0f * (diag[0] * diag[1] + diag[0] * diag[2] + diag[1] * diag[2]);
+}
+
 // 析构函数释放BVH节点内存
 BVH::~BVH() {
     if (root) {
@@ -62,6 +68,11 @@ void BVH::build() {
     std::vector<BVHNode> nodes;
     nodes.reserve(2 * shapes.size() - 1);
     
+    // SAH相关常量
+    const int nBuckets = 12;  // 用于SAH的分桶数量
+    const float traversalCost = 1.0f;  // 遍历节点的开销
+    const float intersectionCost = 1.5f;  // 与图元相交的开销
+    
     // 递归构建函数
     std::function<int(int, int)> recursiveBuild = 
         [&](int start, int end) -> int {
@@ -94,14 +105,11 @@ void BVH::build() {
                 for (int i = start; i < end; ++i)
                     centroidBounds.Expand(primitiveInfo[i].centroid);
                 
-                // 选择最长的轴作为分割轴
+                // 选择最长的轴作为候选分割轴
                 int dim = 0;
                 Vector3f diag = centroidBounds.pMax - centroidBounds.pMin;
                 if (diag[1] > diag[0]) dim = 1;
                 if (diag[2] > diag[dim]) dim = 2;
-                
-                // 根据选择的轴对图元进行排序
-                int mid = (start + end) / 2;
                 
                 // 如果包围盒在某维度上是扁平的，则创建叶子节点
                 if (centroidBounds.pMax[dim] == centroidBounds.pMin[dim]) {
@@ -116,23 +124,109 @@ void BVH::build() {
                     node.box = bounds;
                     node.rightChildOffset = 0;
                 } else {
-                    // 按中点划分（可以选择SAH等更优的划分策略）
-                    std::nth_element(&primitiveInfo[start], &primitiveInfo[mid],
-                                &primitiveInfo[end-1]+1,
-                                [dim](const PrimitiveInfo &a, const PrimitiveInfo &b) {
-                                    return a.centroid[dim] < b.centroid[dim];
+                    // 使用SAH启发式方法找到最佳分割
+                    float minCost = std::numeric_limits<float>::max();
+                    int minCostSplitBucket = 0;
+                    int bestDim = dim;
+                    
+                    // 尝试所有三个维度作为分割轴
+                    for (int d = 0; d < 3; ++d) {
+                        // 如果这个维度平坦，跳过
+                        if (centroidBounds.pMax[d] == centroidBounds.pMin[d])
+                            continue;
+                        
+                        // 初始化桶
+                        struct BucketInfo {
+                            int count = 0;
+                            AABB bounds;
+                        };
+                        BucketInfo buckets[nBuckets];
+                        
+                        // 将图元分配到桶中
+                        for (int i = start; i < end; ++i) {
+                            int b = nBuckets * ((primitiveInfo[i].centroid[d] - centroidBounds.pMin[d]) /
+                                             (centroidBounds.pMax[d] - centroidBounds.pMin[d]));
+                            if (b == nBuckets) b = nBuckets - 1;
+                            buckets[b].count++;
+                            buckets[b].bounds.Expand(primitiveInfo[i].bounds);
+                        }
+                        
+                        // 计算每个可能分割的SAH代价
+                        float cost[nBuckets - 1];
+                        for (int i = 0; i < nBuckets - 1; ++i) {
+                            AABB b0, b1;
+                            int count0 = 0, count1 = 0;
+                            
+                            for (int j = 0; j <= i; ++j) {
+                                b0.Expand(buckets[j].bounds);
+                                count0 += buckets[j].count;
+                            }
+                            
+                            for (int j = i + 1; j < nBuckets; ++j) {
+                                b1.Expand(buckets[j].bounds);
+                                count1 += buckets[j].count;
+                            }
+                            
+                            cost[i] = 1.0f + (count0 * computeSurfaceArea(b0) + count1 * computeSurfaceArea(b1)) / 
+                                     computeSurfaceArea(bounds);
+                            
+                            if (cost[i] < minCost) {
+                                minCost = cost[i];
+                                minCostSplitBucket = i;
+                                bestDim = d;
+                            }
+                        }
+                    }
+
+                    // 当前节点的SAH代价
+                    float oldCost = (float)nPrimitives;
+                    
+                    // 如果使用SAH划分不划算，则创建叶子节点
+                    if (nPrimitives > 4 && minCost < oldCost) {
+                        // 根据SAH进行划分
+                        auto midIter = std::partition(&primitiveInfo[start], &primitiveInfo[end],
+                                [=](const PrimitiveInfo& pi) {
+                                    int b = nBuckets * ((pi.centroid[bestDim] - centroidBounds.pMin[bestDim]) /
+                                                     (centroidBounds.pMax[bestDim] - centroidBounds.pMin[bestDim]));
+                                    if (b == nBuckets) b = nBuckets - 1;
+                                    return b <= minCostSplitBucket;
                                 });
-                    
-                    // 递归创建子节点
-                    node.box = bounds;
-                    node.firstPrimOffset = 0;
-                    node.nPrimitives = 0;
-                    
-                    int leftChildIdx = recursiveBuild(start, mid);
-                    int rightChildIdx = recursiveBuild(mid, end);
-                    
-                    // 右子节点的偏移量是相对于左子节点的
-                    node.rightChildOffset = rightChildIdx - leftChildIdx;
+                        
+                        int mid = midIter - &primitiveInfo[0];
+                        
+                        // 如果划分失败(全部在一边)，则退化为中点划分
+                        if (mid == start || mid == end) {
+                            mid = (start + end) / 2;
+                            std::nth_element(&primitiveInfo[start], &primitiveInfo[mid],
+                                       &primitiveInfo[end-1]+1,
+                                       [bestDim](const PrimitiveInfo &a, const PrimitiveInfo &b) {
+                                           return a.centroid[bestDim] < b.centroid[bestDim];
+                                       });
+                        }
+                        
+                        // 递归创建子节点
+                        node.box = bounds;
+                        node.firstPrimOffset = 0;
+                        node.nPrimitives = 0;
+                        
+                        int leftChildIdx = recursiveBuild(start, mid);
+                        int rightChildIdx = recursiveBuild(mid, end);
+                        
+                        // 右子节点的偏移量是相对于左子节点的
+                        node.rightChildOffset = rightChildIdx - leftChildIdx;
+                    } else {
+                        // 如果SAH代价不划算，创建叶子节点
+                        int firstPrimOffset = orderedShapes.size();
+                        for (int i = start; i < end; ++i) {
+                            int shapeIndex = primitiveInfo[i].shapeIndex;
+                            orderedShapes.push_back(shapes[shapeIndex]);
+                        }
+                        
+                        node.firstPrimOffset = firstPrimOffset;
+                        node.nPrimitives = nPrimitives;
+                        node.box = bounds;
+                        node.rightChildOffset = 0;
+                    }
                 }
             }
             
