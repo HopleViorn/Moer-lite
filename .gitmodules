@@ -10,3 +10,6 @@
 [submodule "externals/tinyobjloader"]
 	path = externals/tinyobjloader
 	url = https://github.com/tinyobjloader/tinyobjloader.git
+[submodule "externals/lbvh"]
+	path = externals/lbvh
+	url = https://github.com/ToruNiina/lbvh.git
